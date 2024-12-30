@@ -249,23 +249,113 @@ def patchSource(hashS,ver):
 
 def ELFF(fname, **kwargs):
     global libappHash
-    min=32
-    if sys.version_info >= (3, 0):
-       f = open(fname, errors="ignore")
-    else:
-       f = open(fname, 'rb') 
-    result = ""
-    for c in f.read():
-       if c in string.printable:
-          result += c
-          continue
-       if len(result) >= min:
-          hashT = re.findall(r"([a-f\d]{32})", result)
-          if(len(hashT)>0):
-            libappHash = hashT[0]
-            f.close()
-            return hashT[0]
-       result = ""
+    min = 32
+    MAX_HASHES = 10
+    
+    # Download hash database if not exists
+    if not os.path.exists("enginehash.csv"):
+        print("\nDownloading engine hash database...")
+        try:
+            urlretrieve("https://raw.githubusercontent.com/ptswarm/reFlutter/main/enginehash.csv", "enginehash.csv")
+        except Exception as e:
+            print(f"\n❌ Failed to download hash database: {str(e)}")
+            return None
+
+    # Read the engine hash database
+    try:
+        with open("enginehash.csv") as f_obj:
+            engine_hashes = [line.strip().split(',')[0] for line in f_obj.readlines()[1:]]
+    except Exception as e:
+        print(f"\n❌ Failed to read hash database: {str(e)}")
+        return None
+
+    # Read and analyze file
+    try:
+        if sys.version_info >= (3, 0):
+            f = open(fname, errors="ignore")
+        else:
+            f = open(fname, 'rb')
+            
+        result = ""
+        found_hash = None
+        
+        # First pass - look for hash in engine database
+        print("\n🔍 Analyzing file...")
+        
+        for c in f.read():
+            if c in string.printable:
+                result += c
+                continue
+                
+            if len(result) >= min:
+                hashT = re.findall(r"([a-f\d]{32})", result)
+                if hashT:
+                    for hash_value in hashT:
+                        if hash_value in engine_hashes:
+                            libappHash = hash_value
+                            print(f"\n✅ Found valid hash: {hash_value}")
+                            f.close()
+                            return hash_value
+            result = ""
+            
+        # If we get here, no hash was found in database
+        # Rewind file and look for potential hashes
+        f.seek(0)
+        result = ""
+        found_hashes = []
+        
+        print("\n⚠️  No valid hash found in database. Looking for alternatives...")
+        
+        for c in f.read():
+            if c in string.printable:
+                result += c
+                continue
+                
+            if len(result) >= min:
+                hashT = re.findall(r"([a-f\d]{32})", result)
+                if hashT:
+                    for hash_value in hashT:
+                        if len(hash_value) == 32 and hash_value not in found_hashes:
+                            found_hashes.append(hash_value)
+                            if len(found_hashes) >= MAX_HASHES:
+                                break
+            result = ""
+            if len(found_hashes) >= MAX_HASHES:
+                break
+            
+        f.close()
+
+        if not found_hashes:
+            print("\n❌ No alternative hashes found")
+            return None
+
+        # Display alternative hashes
+        print("\nFound potential alternative hashes:")
+        for idx, hash_value in enumerate(found_hashes, 1):
+            print(f"{idx}. {hash_value}")
+
+        # Let user choose a hash
+        while True:
+            try:
+                print("\nSelect a hash number (1-{}) or 'q' to quit:".format(len(found_hashes)))
+                choice = input("Your choice: ")
+                if choice.lower() == 'q':
+                    return None
+                    
+                idx = int(choice) - 1
+                if 0 <= idx < len(found_hashes):
+                    chosen_hash = found_hashes[idx]
+                    print(f"\n⚠️  Using non-standard hash: {chosen_hash}")
+                    libappHash = chosen_hash
+                    return chosen_hash
+                else:
+                    print("Invalid selection. Please try again.")
+            except ValueError:
+                print("Invalid input. Please enter a number or 'q'.")
+            
+    except Exception as e:
+        print(f"\n❌ Error analyzing file: {str(e)}")
+        return None
 
 def checkHash():
     if libappHash=="":
